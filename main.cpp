@@ -37,7 +37,8 @@ int main()
 	float deltaTime = 0.0f;
 	float lastTime = 0.0f;
 
-	vulkanRenderer.createMeshModel(std::string(PROJECT_SOURCE_DIR)+"/Models/Seahawk.obj");
+	vulkanRenderer.createMeshModel(std::string(PROJECT_SOURCE_DIR)+"/Models/DamagedHelmet.gltf");
+
 	// Loop until closed
 	while (!glfwWindowShouldClose(window))
 	{
@@ -50,7 +51,7 @@ int main()
 		angle += 60.0f * deltaTime;
 		if (angle > 360.0f) { angle -= 360.0f; }
 
-		glm::mat4 testMat = glm::rotate(glm::mat4(1.f), glm::radians(angle), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::mat4 testMat = glm::rotate(glm::mat4(1.f), glm::radians(angle), glm::vec3(0.0f, 0.0f, 1.0f));
 		//testMat = glm::rotate(testMat, glm::radians(-90.f), glm::vec3(1.0f, 0.0f, 0.0f));
 		vulkanRenderer.updateModel(0, testMat);
 		vulkanRenderer.draw();

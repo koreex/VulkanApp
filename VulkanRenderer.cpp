@@ -184,6 +184,10 @@ void VulkanRenderer::cleanup()
 	vkDestroyImage(mainDevice.logicalDevice, depthBufferImage, nullptr);
 	vkFreeMemory(mainDevice.logicalDevice, depthBufferImageMemory, nullptr);
 
+	vkDestroyImageView(mainDevice.logicalDevice, offscreenDepthBufferImageView, nullptr);
+	vkDestroyImage(mainDevice.logicalDevice, offscreenDepthBufferImage, nullptr);
+	vkFreeMemory(mainDevice.logicalDevice, offscreenDepthBufferImageMemory, nullptr);
+
 	vkDestroyDescriptorPool(mainDevice.logicalDevice, descriptorPool, nullptr);
 	vkDestroyDescriptorSetLayout(mainDevice.logicalDevice, descriptorSetLayout, nullptr);
 	for (size_t i = 0; i < swapChainImages.size(); i++)
@@ -206,9 +210,12 @@ void VulkanRenderer::cleanup()
 	{
 		vkDestroyFramebuffer(mainDevice.logicalDevice, framebuffer, nullptr);
 	}
+	vkDestroyFramebuffer(mainDevice.logicalDevice, offscreenFrameBuffer, nullptr);
 	vkDestroyPipeline(mainDevice.logicalDevice, graphicsPipeline, nullptr);
+	vkDestroyPipeline(mainDevice.logicalDevice, offscreenPipeline, nullptr);
 	vkDestroyPipelineLayout(mainDevice.logicalDevice, pipelineLayout, nullptr);
 	vkDestroyRenderPass(mainDevice.logicalDevice, renderPass, nullptr);
+	vkDestroyRenderPass(mainDevice.logicalDevice, offscreenRenderPass, nullptr);
 	for (auto image : swapChainImages)
 	{
 		vkDestroyImageView(mainDevice.logicalDevice, image.imageView, nullptr);
@@ -472,92 +479,185 @@ void VulkanRenderer::createSwapChain()
 
 void VulkanRenderer::createRenderPass()
 {
-	// ATTACHMENTS
-	// Colour attachment of render pass
-	VkAttachmentDescription colourAttachment = {};
-	colourAttachment.format = swapChainImageFormat;						
-	colourAttachment.samples = VK_SAMPLE_COUNT_1_BIT;					
-	colourAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;				
-	colourAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;			
-	colourAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;	
-	colourAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;	
-
-
-	colourAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;			
-	colourAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;		
-
-
-	// Depth attachment of render pass
-	VkAttachmentDescription depthAttachment = {};
-	depthAttachment.format = chooseSupportedFormat(
-		{ VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT },
-		VK_IMAGE_TILING_OPTIMAL,
-		VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
-	depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-	depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-	// REFERENCES
-	// Attachment reference uses an attachment index that refers to index in the attachment list passed to renderPassCreateInfo
-	VkAttachmentReference colourAttachmentReference = {};
-	colourAttachmentReference.attachment = 0;
-	colourAttachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-	// Depth Attachment Reference
-	VkAttachmentReference depthAttachmentReference = {};
-	depthAttachmentReference.attachment = 1;
-	depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-	// Information about a particular subpass the Render Pass is using
-	VkSubpassDescription subpass = {};
-	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;		// Pipeline type subpass is to be bound to
-	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colourAttachmentReference;
-	subpass.pDepthStencilAttachment = &depthAttachmentReference;
-
-	// Need to determine when layout transitions occur using subpass dependencies
-	std::array<VkSubpassDependency, 2> subpassDependencies;
-
-	// Conversion from VK_IMAGE_LAYOUT_UNDEFINED to VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-
-	subpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;						
-	subpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;		
-	subpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;				
-	// But must happen before...
-	subpassDependencies[0].dstSubpass = 0;
-	subpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	subpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	subpassDependencies[0].dependencyFlags = 0;
-
-	subpassDependencies[1].srcSubpass = 0;
-	subpassDependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	subpassDependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;;
-	// But must happen before...
-	subpassDependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-	subpassDependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-	subpassDependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-	subpassDependencies[1].dependencyFlags = 0;
-
-	std::array<VkAttachmentDescription, 2> renderPassAttachments = { colourAttachment, depthAttachment };
-
-	// Create info for Render Pass
-	VkRenderPassCreateInfo renderPassCreateInfo = {};
-	renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	renderPassCreateInfo.attachmentCount = static_cast<uint32_t>(renderPassAttachments.size());
-	renderPassCreateInfo.pAttachments = renderPassAttachments.data();
-	renderPassCreateInfo.subpassCount = 1;
-	renderPassCreateInfo.pSubpasses = &subpass;
-	renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(subpassDependencies.size());
-	renderPassCreateInfo.pDependencies = subpassDependencies.data();
-
-	VkResult result = vkCreateRenderPass(mainDevice.logicalDevice, &renderPassCreateInfo, nullptr, &renderPass);
-	if (result != VK_SUCCESS)
 	{
-		throw std::runtime_error("Failed to create a Render Pass!");
+		// ATTACHMENTS
+		// Colour attachment of render pass
+		VkAttachmentDescription colourAttachment = {};
+		colourAttachment.format = swapChainImageFormat;
+		colourAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		colourAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colourAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colourAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		colourAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+
+		colourAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		colourAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+
+		// Depth attachment of render pass
+		VkAttachmentDescription depthAttachment = {};
+		depthAttachment.format = chooseSupportedFormat(
+			{ VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT },
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		// REFERENCES
+		// Attachment reference uses an attachment index that refers to index in the attachment list passed to renderPassCreateInfo
+		VkAttachmentReference colourAttachmentReference = {};
+		colourAttachmentReference.attachment = 0;
+		colourAttachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+		// Depth Attachment Reference
+		VkAttachmentReference depthAttachmentReference = {};
+		depthAttachmentReference.attachment = 1;
+		depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		// Information about a particular subpass the Render Pass is using
+		VkSubpassDescription subpass = {};
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;		// Pipeline type subpass is to be bound to
+		subpass.colorAttachmentCount = 1;
+		subpass.pColorAttachments = &colourAttachmentReference;
+		subpass.pDepthStencilAttachment = &depthAttachmentReference;
+
+		// Need to determine when layout transitions occur using subpass dependencies
+		std::array<VkSubpassDependency, 2> subpassDependencies;
+
+		// Conversion from VK_IMAGE_LAYOUT_UNDEFINED to VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+
+		subpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+		subpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		subpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		// But must happen before...
+		subpassDependencies[0].dstSubpass = 0;
+		subpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		subpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		subpassDependencies[0].dependencyFlags = 0;
+
+		subpassDependencies[1].srcSubpass = 0;
+		subpassDependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		subpassDependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;;
+		// But must happen before...
+		subpassDependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+		subpassDependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		subpassDependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		subpassDependencies[1].dependencyFlags = 0;
+
+		std::array<VkAttachmentDescription, 2> renderPassAttachments = { colourAttachment, depthAttachment };
+
+		// Create info for Render Pass
+		VkRenderPassCreateInfo renderPassCreateInfo = {};
+		renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		renderPassCreateInfo.attachmentCount = static_cast<uint32_t>(renderPassAttachments.size());
+		renderPassCreateInfo.pAttachments = renderPassAttachments.data();
+		renderPassCreateInfo.subpassCount = 1;
+		renderPassCreateInfo.pSubpasses = &subpass;
+		renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(subpassDependencies.size());
+		renderPassCreateInfo.pDependencies = subpassDependencies.data();
+
+		VkResult result = vkCreateRenderPass(mainDevice.logicalDevice, &renderPassCreateInfo, nullptr, &renderPass);
+		if (result != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create a Render Pass!");
+		}
+	}
+
+	// Offscreen render pass
+	{
+		// ATTACHMENTS
+		// Colour attachment of render pass
+		VkAttachmentDescription colourAttachment = {};
+		colourAttachment.format = swapChainImageFormat;
+		colourAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		colourAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colourAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colourAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		colourAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+
+		colourAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		colourAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+
+		// Depth attachment of render pass
+		VkAttachmentDescription depthAttachment = {};
+		depthAttachment.format = chooseSupportedFormat(
+			{ VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT },
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		// REFERENCES
+		// Attachment reference uses an attachment index that refers to index in the attachment list passed to renderPassCreateInfo
+		VkAttachmentReference colourAttachmentReference = {};
+		colourAttachmentReference.attachment = 0;
+		colourAttachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+		// Depth Attachment Reference
+		VkAttachmentReference depthAttachmentReference = {};
+		depthAttachmentReference.attachment = 1;
+		depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		// Information about a particular subpass the Render Pass is using
+		VkSubpassDescription subpass = {};
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;		// Pipeline type subpass is to be bound to
+		subpass.colorAttachmentCount = 1;
+		subpass.pColorAttachments = &colourAttachmentReference;
+		subpass.pDepthStencilAttachment = &depthAttachmentReference;
+
+		// Need to determine when layout transitions occur using subpass dependencies
+		std::array<VkSubpassDependency, 2> subpassDependencies;
+
+		// Conversion from VK_IMAGE_LAYOUT_UNDEFINED to VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+
+		subpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+		subpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		subpassDependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		// But must happen before...
+		subpassDependencies[0].dstSubpass = 0;
+		subpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		subpassDependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		subpassDependencies[0].dependencyFlags = 0;
+
+		subpassDependencies[1].srcSubpass = 0;
+		subpassDependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		subpassDependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;;
+		// But must happen before...
+		subpassDependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+		subpassDependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		subpassDependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		subpassDependencies[1].dependencyFlags = 0;
+
+		std::array<VkAttachmentDescription, 2> renderPassAttachments = { colourAttachment, depthAttachment };
+
+		// Create info for Render Pass
+		VkRenderPassCreateInfo renderPassCreateInfo = {};
+		renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		renderPassCreateInfo.attachmentCount = static_cast<uint32_t>(renderPassAttachments.size());
+		renderPassCreateInfo.pAttachments = renderPassAttachments.data();
+		renderPassCreateInfo.subpassCount = 1;
+		renderPassCreateInfo.pSubpasses = &subpass;
+		renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(subpassDependencies.size());
+		renderPassCreateInfo.pDependencies = subpassDependencies.data();
+
+		VkResult result = vkCreateRenderPass(mainDevice.logicalDevice, &renderPassCreateInfo, nullptr, &offscreenRenderPass);
+		if (result != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create a Render Pass!");
+		}
 	}
 }
 
@@ -641,10 +741,14 @@ void VulkanRenderer::createGraphicsPipeline()
 	// Read in SPIR-V code of shaders
 	auto vertexShaderCode = readFile(RootCmakeDirectory + "/Shaders/vert.spv");
 	auto fragmentShaderCode = readFile(RootCmakeDirectory + "/Shaders/frag.spv");
+	auto offscreenVertexShaderCode = readFile(RootCmakeDirectory + "/Shaders/offscreen.vert.spv");
+	auto offscreenFragmentShaderCode = readFile(RootCmakeDirectory + "/Shaders/offscreen.frag.spv");
 
 	// Create Shader Modules
 	VkShaderModule vertexShaderModule = createShaderModule(vertexShaderCode);
 	VkShaderModule fragmentShaderModule = createShaderModule(fragmentShaderCode);
+	VkShaderModule offscreenVertexShaderModule = createShaderModule(offscreenVertexShaderCode);
+	VkShaderModule offscreenFragmentShaderModule = createShaderModule(offscreenFragmentShaderCode);
 
 	// -- SHADER STAGE CREATION INFORMATION --
 	// Vertex Stage creation information
@@ -659,11 +763,26 @@ void VulkanRenderer::createGraphicsPipeline()
 	fragmentShaderCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	fragmentShaderCreateInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;				
 	fragmentShaderCreateInfo.module = fragmentShaderModule;						
-	fragmentShaderCreateInfo.pName = "main";									
+	fragmentShaderCreateInfo.pName = "main";
+
+	// Vertex Stage creation information
+	VkPipelineShaderStageCreateInfo offscreenVertexShaderCreateInfo = {};
+	offscreenVertexShaderCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	offscreenVertexShaderCreateInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	offscreenVertexShaderCreateInfo.module = offscreenVertexShaderModule;
+	offscreenVertexShaderCreateInfo.pName = "main";
+
+	// Fragment Stage creation information
+	VkPipelineShaderStageCreateInfo offscreenFragmentShaderCreateInfo = {};
+	offscreenFragmentShaderCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	offscreenFragmentShaderCreateInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	offscreenFragmentShaderCreateInfo.module = offscreenFragmentShaderModule;
+	offscreenFragmentShaderCreateInfo.pName = "main";
 
 	// Put shader stage creation info in to array
 	// Graphics Pipeline creation info requires array of shader stage creates
 	VkPipelineShaderStageCreateInfo shaderStages[] = { vertexShaderCreateInfo, fragmentShaderCreateInfo };
+	VkPipelineShaderStageCreateInfo offscreenShaderStages[] = { offscreenVertexShaderCreateInfo, offscreenFragmentShaderCreateInfo };
 
 	// How the data for a single vertex (including info such as position, colour, texture coords, normals, etc) is as a whole
 	VkVertexInputBindingDescription bindingDescription = {};
@@ -851,6 +970,17 @@ void VulkanRenderer::createGraphicsPipeline()
 		throw std::runtime_error("Failed to create a Graphics Pipeline!");
 	}
 
+	// create offscreen pipeline
+	pipelineCreateInfo.renderPass = offscreenRenderPass;
+	pipelineCreateInfo.pStages = offscreenShaderStages;
+	/*pipelineCreateInfo.stageCount = 1;
+	colourBlendingCreateInfo.attachmentCount = 0;*/
+	result = vkCreateGraphicsPipelines(mainDevice.logicalDevice, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &offscreenPipeline);
+	if (result != VK_SUCCESS)
+	{
+		throw std::runtime_error("Failed to create a Graphics Pipeline!");
+	}
+
 	// Destroy Shader Modules, no longer needed after Pipeline created
 	vkDestroyShaderModule(mainDevice.logicalDevice, fragmentShaderModule, nullptr);
 	vkDestroyShaderModule(mainDevice.logicalDevice, vertexShaderModule, nullptr);
@@ -870,6 +1000,13 @@ void VulkanRenderer::createDepthBufferImage()
 
 	// Create Depth Buffer Image View
 	depthBufferImageView = createImageView(depthBufferImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	// Create Depth Buffer Image
+	offscreenDepthBufferImage = createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL,
+		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &offscreenDepthBufferImageMemory);
+
+	// Create Depth Buffer Image View
+	offscreenDepthBufferImageView = createImageView(offscreenDepthBufferImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 void VulkanRenderer::createFramebuffers()
@@ -895,6 +1032,30 @@ void VulkanRenderer::createFramebuffers()
 		framebufferCreateInfo.layers = 1;													// Framebuffer layers
 
 		VkResult result = vkCreateFramebuffer(mainDevice.logicalDevice, &framebufferCreateInfo, nullptr, &swapChainFramebuffers[i]);
+		if (result != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create a Framebuffer!");
+		}
+	}
+
+	// offscreen framebuffer
+
+	{
+		std::array<VkImageView, 2> attachments = {
+			swapChainImages[0].imageView,
+			offscreenDepthBufferImageView
+		};
+
+		VkFramebufferCreateInfo framebufferCreateInfo = {};
+		framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferCreateInfo.renderPass = offscreenRenderPass;										// Render Pass layout the Framebuffer will be used with
+		framebufferCreateInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+		framebufferCreateInfo.pAttachments = attachments.data();							// List of attachments (1:1 with Render Pass)
+		framebufferCreateInfo.width = swapChainExtent.width;								// Framebuffer width
+		framebufferCreateInfo.height = swapChainExtent.height;								// Framebuffer height
+		framebufferCreateInfo.layers = 1;													// Framebuffer layers
+
+		VkResult result = vkCreateFramebuffer(mainDevice.logicalDevice, &framebufferCreateInfo, nullptr, &offscreenFrameBuffer);
 		if (result != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create a Framebuffer!");
@@ -1156,26 +1317,11 @@ void VulkanRenderer::updateUniformBuffers(uint32_t imageIndex)
 
 void VulkanRenderer::recordCommands(uint32_t currentImage)
 {
+
 	// Information about how to begin each command buffer
 	VkCommandBufferBeginInfo bufferBeginInfo = {};
 	bufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-	// Information about how to begin a render pass (only needed for graphical applications)
-	VkRenderPassBeginInfo renderPassBeginInfo = {};
-	renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-	renderPassBeginInfo.renderPass = renderPass;							// Render Pass to begin
-	renderPassBeginInfo.renderArea.offset = { 0, 0 };						// Start point of render pass in pixels
-	renderPassBeginInfo.renderArea.extent = swapChainExtent;				// Size of region to run render pass on (starting at offset)
-
-	std::array<VkClearValue, 2> clearValues = {};
-	clearValues[0].color = { 0.6f, 0.65f, 0.4f, 1.0f };
-	clearValues[1].depthStencil.depth = 1.0f;
-
-	renderPassBeginInfo.pClearValues = clearValues.data();					// List of clear values
-	renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-
-	renderPassBeginInfo.framebuffer = swapChainFramebuffers[currentImage];
-
+	
 	// Start recording commands to command buffer!
 	VkResult result = vkBeginCommandBuffer(commandBuffers[currentImage], &bufferBeginInfo);
 	if (result != VK_SUCCESS)
@@ -1183,55 +1329,143 @@ void VulkanRenderer::recordCommands(uint32_t currentImage)
 		throw std::runtime_error("Failed to start recording a Command Buffer!");
 	}
 
-	// Begin Render Pass
-	vkCmdBeginRenderPass(commandBuffers[currentImage], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-	// Bind Pipeline to be used in render pass
-	vkCmdBindPipeline(commandBuffers[currentImage], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-	for (size_t j = 0; j < modelList.size(); j++)
+	// First render pass for shadow map
 	{
-		MeshModel thisModel = modelList[j];
 
-		vkCmdPushConstants(
-			commandBuffers[currentImage],
-			pipelineLayout,
-			VK_SHADER_STAGE_VERTEX_BIT,		// Stage to push constants to
-			0,								// Offset of push constants to update
-			sizeof(Model),					// Size of data being pushed
-			&thisModel.GetModel());			// Actual data being pushed (can be array)
+		// Information about how to begin a render pass (only needed for graphical applications)
+		VkRenderPassBeginInfo renderPassBeginInfo = {};
+		renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderPassBeginInfo.renderPass = offscreenRenderPass;							// Render Pass to begin
+		renderPassBeginInfo.renderArea.offset = { 0, 0 };						// Start point of render pass in pixels
+		renderPassBeginInfo.renderArea.extent = swapChainExtent;				// Size of region to run render pass on (starting at offset)
 
-		for (size_t k = 0; k < thisModel.GetMeshCount(); k++)
+		std::array<VkClearValue, 2> clearValues = {};
+		clearValues[0].color = { 0.6f, 0.65f, 0.4f, 1.0f };
+		clearValues[1].depthStencil.depth = 1.0f;
+
+		renderPassBeginInfo.pClearValues = clearValues.data();					// List of clear values
+		renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+
+		renderPassBeginInfo.framebuffer = offscreenFrameBuffer;
+
+		// Begin Render Pass
+		vkCmdBeginRenderPass(commandBuffers[currentImage], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		// Bind Pipeline to be used in render pass
+		vkCmdBindPipeline(commandBuffers[currentImage], VK_PIPELINE_BIND_POINT_GRAPHICS, offscreenPipeline);
+
+		for (size_t j = 0; j < modelList.size(); j++)
 		{
+			MeshModel thisModel = modelList[j];
 
-			VkBuffer vertexBuffers[] = { thisModel.GetMesh(k)->getVertexBuffer() };					// Buffers to bind
-			VkDeviceSize offsets[] = { 0 };												// Offsets into buffers being bound
-			vkCmdBindVertexBuffers(commandBuffers[currentImage], 0, 1, vertexBuffers, offsets);	// Command to bind vertex buffer before drawing with them
+			vkCmdPushConstants(
+				commandBuffers[currentImage],
+				pipelineLayout,
+				VK_SHADER_STAGE_VERTEX_BIT,		// Stage to push constants to
+				0,								// Offset of push constants to update
+				sizeof(Model),					// Size of data being pushed
+				&thisModel.GetModel());			// Actual data being pushed (can be array)
 
-			// Bind mesh index buffer, with 0 offset and using the uint32 type
-			vkCmdBindIndexBuffer(commandBuffers[currentImage], thisModel.GetMesh(k)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+			for (size_t k = 0; k < thisModel.GetMeshCount(); k++)
+			{
 
-			// Dynamic Offset Amount
-			// uint32_t dynamicOffset = static_cast<uint32_t>(modelUniformAlignment) * j;
+				VkBuffer vertexBuffers[] = { thisModel.GetMesh(k)->getVertexBuffer() };					// Buffers to bind
+				VkDeviceSize offsets[] = { 0 };												// Offsets into buffers being bound
+				vkCmdBindVertexBuffers(commandBuffers[currentImage], 0, 1, vertexBuffers, offsets);	// Command to bind vertex buffer before drawing with them
+
+				// Bind mesh index buffer, with 0 offset and using the uint32 type
+				vkCmdBindIndexBuffer(commandBuffers[currentImage], thisModel.GetMesh(k)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+				// Dynamic Offset Amount
+				// uint32_t dynamicOffset = static_cast<uint32_t>(modelUniformAlignment) * j;
 
 
 
-			std::array<VkDescriptorSet, 2> descriptorSetGroup = {
-				descriptorSets[currentImage],
-				samplerDescriptorSets[thisModel.GetMesh(k)->getTexId()]
-			};
+				std::array<VkDescriptorSet, 2> descriptorSetGroup = {
+					descriptorSets[currentImage],
+					samplerDescriptorSets[thisModel.GetMesh(k)->getTexId()]
+				};
 
-			// Bind Descriptor Sets
-			vkCmdBindDescriptorSets(commandBuffers[currentImage], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
-				0, static_cast<uint32_t>(descriptorSetGroup.size()), descriptorSetGroup.data(), 0, nullptr);
+				// Bind Descriptor Sets
+				vkCmdBindDescriptorSets(commandBuffers[currentImage], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
+					0, static_cast<uint32_t>(descriptorSetGroup.size()), descriptorSetGroup.data(), 0, nullptr);
 
-			// Execute pipeline
-			vkCmdDrawIndexed(commandBuffers[currentImage], thisModel.GetMesh(k)->getIndexCount(), 1, 0, 0, 0);
+				// Execute pipeline
+				vkCmdDrawIndexed(commandBuffers[currentImage], thisModel.GetMesh(k)->getIndexCount(), 1, 0, 0, 0);
+			}
 		}
+
+		// End Render Pass
+		vkCmdEndRenderPass(commandBuffers[currentImage]);
 	}
 
-	// End Render Pass
-	vkCmdEndRenderPass(commandBuffers[currentImage]);
+	{
+		// Information about how to begin a render pass (only needed for graphical applications)
+		VkRenderPassBeginInfo renderPassBeginInfo = {};
+		renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderPassBeginInfo.renderPass = renderPass;							// Render Pass to begin
+		renderPassBeginInfo.renderArea.offset = { 0, 0 };						// Start point of render pass in pixels
+		renderPassBeginInfo.renderArea.extent = swapChainExtent;				// Size of region to run render pass on (starting at offset)
+
+		std::array<VkClearValue, 2> clearValues = {};
+		clearValues[0].color = { 0.6f, 0.65f, 0.4f, 1.0f };
+		clearValues[1].depthStencil.depth = 1.0f;
+
+		renderPassBeginInfo.pClearValues = clearValues.data();					// List of clear values
+		renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+
+		renderPassBeginInfo.framebuffer = swapChainFramebuffers[currentImage];
+
+		// Begin Render Pass
+		vkCmdBeginRenderPass(commandBuffers[currentImage], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		// Bind Pipeline to be used in render pass
+		vkCmdBindPipeline(commandBuffers[currentImage], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+		for (size_t j = 0; j < modelList.size(); j++)
+		{
+			MeshModel thisModel = modelList[j];
+
+			vkCmdPushConstants(
+				commandBuffers[currentImage],
+				pipelineLayout,
+				VK_SHADER_STAGE_VERTEX_BIT,		// Stage to push constants to
+				0,								// Offset of push constants to update
+				sizeof(Model),					// Size of data being pushed
+				&thisModel.GetModel());			// Actual data being pushed (can be array)
+
+			for (size_t k = 0; k < thisModel.GetMeshCount(); k++)
+			{
+
+				VkBuffer vertexBuffers[] = { thisModel.GetMesh(k)->getVertexBuffer() };					// Buffers to bind
+				VkDeviceSize offsets[] = { 0 };												// Offsets into buffers being bound
+				vkCmdBindVertexBuffers(commandBuffers[currentImage], 0, 1, vertexBuffers, offsets);	// Command to bind vertex buffer before drawing with them
+
+				// Bind mesh index buffer, with 0 offset and using the uint32 type
+				vkCmdBindIndexBuffer(commandBuffers[currentImage], thisModel.GetMesh(k)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+				// Dynamic Offset Amount
+				// uint32_t dynamicOffset = static_cast<uint32_t>(modelUniformAlignment) * j;
+
+
+
+				std::array<VkDescriptorSet, 2> descriptorSetGroup = {
+					descriptorSets[currentImage],
+					samplerDescriptorSets[thisModel.GetMesh(k)->getTexId()]
+				};
+
+				// Bind Descriptor Sets
+				vkCmdBindDescriptorSets(commandBuffers[currentImage], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
+					0, static_cast<uint32_t>(descriptorSetGroup.size()), descriptorSetGroup.data(), 0, nullptr);
+
+				// Execute pipeline
+				vkCmdDrawIndexed(commandBuffers[currentImage], thisModel.GetMesh(k)->getIndexCount(), 1, 0, 0, 0);
+			}
+		}
+
+		// End Render Pass
+		vkCmdEndRenderPass(commandBuffers[currentImage]);
+	}
 
 	// Stop recording to command buffer
 	result = vkEndCommandBuffer(commandBuffers[currentImage]);
@@ -1239,7 +1473,6 @@ void VulkanRenderer::recordCommands(uint32_t currentImage)
 	{
 		throw std::runtime_error("Failed to stop recording a Command Buffer!");
 	}
-
 }
 
 void VulkanRenderer::getPhysicalDevice()

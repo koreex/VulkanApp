@@ -7,13 +7,29 @@ layout(location = 1) in vec2 texCoord;
 layout(location = 2) in vec3 vViewDir;
 layout(location = 3) in vec3 vLightDir;
 layout(location = 4) in vec3 vNormal;
+layout(location = 5) in vec4 inShadowCoord;
 
 layout(set = 1, binding = 0) uniform sampler2D albedoMap;
 layout(set = 1, binding = 1) uniform sampler2D roughnessMap;
 layout(set = 1, binding = 2) uniform sampler2D normalMap;
 layout(set = 1, binding = 3) uniform sampler2D emissiveMap;
+layout(set = 1, binding = 4) uniform sampler2D shadowMap;
 
 layout(location = 0) out vec4 outColor; 	// Final output	 color (must also have location)
+
+float textureProj(vec4 shadowCoord, vec2 off)
+{
+	float shadow = 1.0;
+	if ( shadowCoord.z > -1.0 && shadowCoord.z < 1.0 ) 
+	{
+		float dist = texture( shadowMap, shadowCoord.st + off ).r;
+		if ( shadowCoord.w > 0.0 && dist < shadowCoord.z ) 
+		{
+			shadow = 0.0;
+		}
+	}
+	return shadow;
+}
 
 vec3 CookTorrance(vec3 materialDiffuseColor,
 	float roughness,
@@ -66,6 +82,9 @@ void main() {
 	vec3 normal = normalize(texture(normalMap, texCoord).rgb);
 	vec3 emissive = texture(emissiveMap, texCoord).rgb;
 
+	float shadow = textureProj(inShadowCoord / inShadowCoord.w, vec2(0.0));
+
+
 	outColor = vec4(
 		CookTorrance(albedo,
 			roughness,
@@ -73,6 +92,6 @@ void main() {
 			vNormal,
 			vLightDir,
 			vViewDir,
-			lightColor) + albedo * 0.2,
+			lightColor) * shadow + albedo * 0.3,
 		1);
 }

@@ -15,6 +15,11 @@ layout(set = 0, binding = 1) uniform UboModel {
 	mat4 model;
 } uboModel;
 
+layout(set = 2, binding = 2) uniform LightViewProjection {
+	mat4 projection;
+	mat4 view;
+} lightViewProjection;
+
 layout(push_constant) uniform PushModel {
 	mat4 model;
 } pushModel;
@@ -26,5 +31,5 @@ out gl_PerVertex
 };
 
 void main() {
-	gl_Position = uboViewProjection.projection * uboViewProjection.view * pushModel.model * vec4(pos, 1.0);
+	gl_Position = lightViewProjection.projection * lightViewProjection.view * pushModel.model * vec4(pos, 1.0);
 }

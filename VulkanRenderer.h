@@ -54,6 +54,12 @@ private:
 		glm::mat4 view;
 	} uboViewProjection;
 
+	// light VP
+	struct LightViewProjection {
+		glm::mat4 projection;
+		glm::mat4 view;
+	} lightViewProjection;
+
 	// Vulkan Components
 	// - Main
 	VkInstance instance;
@@ -84,17 +90,23 @@ private:
 
 	// - Descriptors
 	VkDescriptorSetLayout descriptorSetLayout;
+	VkDescriptorSetLayout light_descriptorSetLayout;
 	VkDescriptorSetLayout samplerSetLayout;
 	VkDescriptorSetLayout roughnessSamplerSetLayout;
 	VkPushConstantRange pushConstantRange;
 
 	VkDescriptorPool descriptorPool;
+	VkDescriptorPool light_descriptorPool;
 	VkDescriptorPool samplerDescriptorPool;
 	std::vector<VkDescriptorSet> descriptorSets;
+	std::vector<VkDescriptorSet> light_descriptorSets;
 	std::vector<VkDescriptorSet> samplerDescriptorSets;
 
 	std::vector<VkBuffer> vpUniformBuffer;
 	std::vector<VkDeviceMemory> vpUniformBufferMemory;
+
+	std::vector<VkBuffer> light_vpUniformBuffer;
+	std::vector<VkDeviceMemory> light_vpUniformBufferMemory;
 
 	std::vector<VkBuffer> modelDUniformBuffer;
 	std::vector<VkDeviceMemory> modelDUniformBufferMemory;

@@ -15,6 +15,11 @@ layout(set = 0, binding = 1) uniform UboModel {
 	mat4 model;
 } uboModel;
 
+layout(set = 2, binding = 2) uniform LightViewProjection {
+	mat4 projection;
+	mat4 view;
+} lightViewProjection;
+
 layout(push_constant) uniform PushModel {
 	mat4 model;
 } pushModel;
@@ -24,9 +29,17 @@ layout(location = 1) out vec2 fragTex;
 layout(location = 2) out vec3 vViewDir;
 layout(location = 3) out vec3 vLightDir;
 layout(location = 4) out vec3 vNormal;
+layout(location = 5) out vec4 shadowCoord;
+
+const mat4 biasMat = mat4( 
+	0.5, 0.0, 0.0, 0.0,
+	0.0, 0.5, 0.0, 0.0,
+	0.0, 0.0, 1.0, 0.0,
+	0.5, 0.5, 0.0, 1.0 );
 
 void main() {
 	gl_Position = uboViewProjection.projection * uboViewProjection.view * pushModel.model * vec4(pos, 1.0);
+	shadowCoord = (biasMat * lightViewProjection.projection * lightViewProjection.view) * vec4(pos, 1.0);
 
 	vec3 eyePos = vec3(5, 0, 0);
 	vec3 dirLightDir = normalize(vec3(1, 1, 1));
